@@ -37,6 +37,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install bubblewrap (as engine.yml's agent job does)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
       - name: Install Claude Code (the version engine.yml pins)
         run: npm install -g @anthropic-ai/claude-code@2.1.289
       - name: Isolation flags on, so neither marker may appear

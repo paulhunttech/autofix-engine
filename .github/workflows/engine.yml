@@ -238,6 +238,10 @@ jobs:
           python3 -c 'import json, os, sys
           json.dump({"finding": os.environ["INPUT_FINDING"], "brief": os.environ["INPUT_BRIEF"]}, open(sys.argv[1], "w"))
           json.dump(json.loads(os.environ["ALLOW"]), open(sys.argv[2], "w"))' work/.autofix/hints.json work/.autofix/allow.json
+      - name: Install bubblewrap (required by CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
       - name: Install Claude Code (pinned)
         run: npm install -g @anthropic-ai/claude-code@2.1.289
       - name: Run the agent

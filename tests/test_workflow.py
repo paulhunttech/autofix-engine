@@ -136,6 +136,16 @@ def test_canary_uses_the_engine_cli_version():
     assert re.fullmatch(r"\d+\.\d+\.\d+", pin[0])
 
 
+@pytest.mark.parametrize("path,job", [(".github/workflows/engine.yml", "agent"), (".github/workflows/ci.yml", "canary")])
+def test_bubblewrap_installed_before_the_agent_runs(path, job):
+    """CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 needs bubblewrap; without it claude exits before start-up
+    (observed in the first CI canary run). Mutant killed: the install step dropped from either job."""
+    runs = [s.get("run", "") for s in load(path)["jobs"][job]["steps"]]
+    install = next(i for i, r in enumerate(runs) if "apt-get install" in r and "bubblewrap" in r)
+    agent = next(i for i, r in enumerate(runs) if "run_agent.sh" in r or "canary.sh" in r)
+    assert install < agent
+
+
 def test_third_party_actions_pinned_by_sha():
     for path in all_workflows() + ["examples/host/.github/workflows/autofix.yml"]:
         for ref in re.findall(r"^\s*(?:-\s+)?uses:\s*(\S+)", read(path), re.M):
