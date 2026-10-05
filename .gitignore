@@ -1,0 +1,22 @@
+# Secrets — never commit. Real credential files only.
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+secrets.json
+secrets.yaml
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Claude Code — personal, per-machine permission grants
+.claude/settings.local.json
