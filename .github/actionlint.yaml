@@ -1,0 +1,7 @@
+# job.workflow_repository and job.workflow_sha are documented in GitHub's contexts
+# reference ("The commit SHA of the workflow file that defines the current job") but
+# are newer than actionlint 1.7.12's context schema. Ignore exactly those two.
+paths:
+  .github/workflows/engine.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'

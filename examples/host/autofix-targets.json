@@ -1,0 +1,9 @@
+{
+  "targets": {
+    "example-api": {
+      "repo": "example-org/example-api",
+      "allow": ["src/**", "tests/**"],
+      "workspace": "00000000-0000-0000-0000-000000000000"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "outcome": { "type": "string", "enum": ["patch", "no_fix"] },
+    "title": { "type": "string", "maxLength": 200 },
+    "summary": { "type": "string", "maxLength": 4000 }
+  },
+  "required": ["outcome", "title", "summary"],
+  "additionalProperties": false
+}

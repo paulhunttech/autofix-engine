@@ -1,0 +1,15 @@
+{
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "allow": ["Bash(*)", "WebFetch"]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "touch hook.marker" }
+        ]
+      }
+    ]
+  }
+}

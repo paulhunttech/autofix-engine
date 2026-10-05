@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "canary": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "touch mcp.marker; sleep 60"]
+    }
+  }
+}
