@@ -1,0 +1,56 @@
+# The host's whole workflow. Replace <full sha> with the engine commit you have reviewed.
+name: autofix
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: string
+        required: true
+      problem_id:
+        type: string
+        required: true
+      window_start:
+        type: string
+        required: true
+      window_end:
+        type: string
+        required: true
+      finding:
+        type: string
+        required: true
+      brief:
+        type: string
+        required: false
+        default: ""
+      dry_run:
+        type: string
+        required: false
+        default: "true"
+
+concurrency:
+  group: autofix-${{ inputs.target }}-${{ inputs.problem_id }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    # Reusable workflows can only reduce permissions, so grant both here.
+    permissions:
+      contents: read
+      id-token: write
+    uses: OWNER/autofix-engine/.github/workflows/engine.yml@0000000000000000000000000000000000000000 # <full sha>
+    with:
+      target: ${{ inputs.target }}
+      problem_id: ${{ inputs.problem_id }}
+      window_start: ${{ inputs.window_start }}
+      window_end: ${{ inputs.window_end }}
+      finding: ${{ inputs.finding }}
+      brief: ${{ inputs.brief }}
+      dry_run: ${{ inputs.dry_run }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PR_APP_CLIENT_ID: ${{ secrets.PR_APP_CLIENT_ID }}
+      PR_APP_PRIVATE_KEY: ${{ secrets.PR_APP_PRIVATE_KEY }}
