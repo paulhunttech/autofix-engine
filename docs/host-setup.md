@@ -61,15 +61,17 @@ The `evidence` job logs in with OpenID Connect, so the host holds **no Azure sec
 2. Add a **federated credential**:
    - issuer `https://token.actions.githubusercontent.com`;
    - audience `api://AzureADTokenExchange`;
-   - subject `repo:<org>/<host repo>:ref:refs/heads/main`.
+   - subject `<prefix>:ref:refs/heads/main`, where `<prefix>` is what GitHub reports for the host repo (below).
 
    In a reusable workflow the token's subject names the **caller**, which is the host, so the credential is federated to the host and not to the engine.
+
+   ⚠️ **Read the prefix from GitHub; don't write it as `repo:<org>/<repo>`.** A repo using GitHub's immutable subject format issues `repo:<org>@<org id>/<repo>@<repo id>`, which never matches the plain form. The login then fails with `AADSTS700213: No matching federated identity record`. Ask the repo directly: `gh api "repos/$HostRepo/actions/oidc/customization/sub"` returns `sub_claim_prefix`, the exact prefix its tokens carry. *This corrects the subject as first written, `repo:<org>/<host repo>:ref:refs/heads/main`, which failed on the first host (2026-10-06).*
 3. Grant it **Log Analytics Reader** on each workspace a target lists, and nothing wider.
 
 ```powershell
-$HostName = $HostRepo.Split('/')[1]
-$Subject = "repo:$($Org)/$($HostName):ref:refs/heads/main"
-az ad app federated-credential create --id '<app object id>' --parameters "{`"name`":`"autofix-host`",`"issuer`":`"https://token.actions.githubusercontent.com`",`"subject`":`"$Subject`",`"audiences`":[`"api://AzureADTokenExchange`"]}"
+$Prefix = gh api "repos/$HostRepo/actions/oidc/customization/sub" --jq '.sub_claim_prefix'
+@{ name = 'autofix-host-main'; issuer = 'https://token.actions.githubusercontent.com'; subject = "$($Prefix):ref:refs/heads/main"; audiences = @('api://AzureADTokenExchange') } | ConvertTo-Json | Set-Content fic.json
+az ad app federated-credential create --id '<app object id>' --parameters fic.json
 az role assignment create --assignee '<client id>' --role 'Log Analytics Reader' --scope '<workspace resource id>'
 ```
 
@@ -85,12 +87,20 @@ $Target = "$Org/<target repo>"
 
 Contents *write* lets the PR App create, move and delete **tags** as well as branches. So a target that deploys on a tag push needs its tags protected too, not only its branches. Create **two** rulesets on the target:
 
-- one covering **every branch except `autofix/**`**;
+- one covering **every branch except `autofix/**` and the integration branch**, meaning the branch the engine's PRs merge into (the default branch, `$Integration` below);
 - one covering **every tag**.
 
 Each restricts creation, update and deletion. Their bypass actors are the people and roles who push today. **The PR App must not be one of them.**
 
+⚠️ **The integration branch must be excluded, and it must already require a pull request through its own ruleset or branch protection.**
+- **Why exclude it:** merging a PR *updates* that branch, and GitHub applies a bypass to a merge only when the person merging asks for it explicitly. That means ticking "bypass rules", or `gh pr merge --admin`.
+- **What happens if it isn't excluded:** every ordinary merge into it fails with "Cannot update this protected ref". This was observed on the first target, on 2026-10-06.
+- **Why it's still safe:** its own PR requirement already stops the PR App pushing to it directly. Gate 2 keeps the required check red until a person has read an autofix PR, so the App can't merge one either.
+
+*This corrects the gate as first written, which covered every branch, the integration branch included.* If the integration branch doesn't require a PR, add that first: it is the protection this exclusion relies on.
+
 ```powershell
+$Integration = gh api "repos/$Target" --jq '.default_branch'   # the branch PRs merge into, if not the default
 $Bypass = @(
   # The roles that push today. For example, the repository admin role (role id 5):
   @{ actor_id = 5; actor_type = 'RepositoryRole'; bypass_mode = 'always' }
@@ -98,7 +108,7 @@ $Bypass = @(
 $Rules = @(@{ type = 'creation' }, @{ type = 'update' }, @{ type = 'deletion' })
 $Branches = @{
   name = 'autofix: protect every non-autofix branch'; target = 'branch'; enforcement = 'active'
-  conditions = @{ ref_name = @{ include = @('~ALL'); exclude = @('refs/heads/autofix/**') } }
+  conditions = @{ ref_name = @{ include = @('~ALL'); exclude = @('refs/heads/autofix/**', "refs/heads/$Integration") } }
   rules = $Rules; bypass_actors = $Bypass
 } | ConvertTo-Json -Depth 6
 $Tags = @{
@@ -110,15 +120,23 @@ $Branches | gh api --method POST "repos/$Target/rulesets" --input -
 $Tags | gh api --method POST "repos/$Target/rulesets" --input -
 ```
 
-Adjust `$Bypass` before you run it. Anyone who pushes to the default branch or pushes tags directly today needs a bypass entry, or that push stops working.
+Adjust `$Bypass` before you run it. Anyone who creates or pushes branches other than the integration branch, or pushes tags, needs a bypass entry, or that push stops working. That includes release pushes to a production branch. Check who pushes today with `gh api --paginate "repos/$Target/activity?per_page=100&time_period=quarter" --jq '.[].actor.login'`.
 
-**Read it back.** This check must print `PASS`. It probes the real default branch, a made-up branch name that must be protected, and an `autofix/` name that must not be. The branch-rules endpoint answers for names that don't exist. It also confirms an active tag ruleset, and that no ruleset, including organisation-level ones, lists the PR App as a bypass actor.
+**Read it back.** This check must print `PASS`. It probes:
+- the integration branch, which must keep its PR requirement and must **not** be update-restricted, or merges break;
+- each branch you name in `$Deploying`, typically the branches whose push deploys, which must be update-restricted;
+- a made-up branch name, which must be protected;
+- an `autofix/` name, which must not be.
+
+The branch-rules endpoint answers for names that don't exist. The check also confirms an active tag ruleset, and that no ruleset, including organisation-level ones, lists the PR App as a bypass actor.
 
 ```powershell
 $AppId = '<the PR App numeric app id>'
-$Default = gh api "repos/$Target" --jq '.default_branch'
+$Deploying = @('main')   # every branch whose push deploys, other than the integration branch
 function Get-RuleTypes($Branch) { (gh api "repos/$Target/rules/branches/$Branch" | ConvertFrom-Json).type }
-$DefaultOk = (Get-RuleTypes $Default) -contains 'update'
+$IntegrationRules = Get-RuleTypes $Integration
+$IntegrationOk = ($IntegrationRules -contains 'pull_request') -and -not ($IntegrationRules -contains 'update')
+$DeployingOk = -not ($Deploying | Where-Object { -not ((Get-RuleTypes $_) -contains 'update') })
 $OtherOk = (Get-RuleTypes 'autofix-gate-probe') -contains 'creation'
 $AutofixFree = -not ((Get-RuleTypes 'autofix/gate-probe') | Where-Object { $_ -in 'creation', 'update', 'deletion' })
 $Sets = foreach ($Id in (gh api "repos/$Target/rulesets?includes_parents=true" --jq '.[].id')) { gh api "repos/$Target/rulesets/$Id" | ConvertFrom-Json }
@@ -128,11 +146,12 @@ $AppBypasses = [bool]($Sets.bypass_actors | Where-Object { $_.actor_type -eq 'In
 # organisation ruleset read by a repository admin comes back without it, and silence is not a pass.
 $Unseen = @($Sets | Where-Object { -not $_.PSObject.Properties['bypass_actors'] })
 if ($Unseen.Count -gt 0) { "FAIL: cannot read the bypass list of $($Unseen.Count) ruleset(s): $($Unseen.name -join ', '). Have an organisation owner run this check." }
-elseif ($DefaultOk -and $OtherOk -and $AutofixFree -and $TagOk -and -not $AppBypasses) { 'PASS' }
-else { "FAIL: default=$DefaultOk other-branch=$OtherOk autofix-free=$AutofixFree tags=$TagOk app-can-bypass=$AppBypasses" }
+elseif ($IntegrationOk -and $DeployingOk -and $OtherOk -and $AutofixFree -and $TagOk -and -not $AppBypasses) { 'PASS' }
+else { "FAIL: integration=$IntegrationOk deploying=$DeployingOk other-branch=$OtherOk autofix-free=$AutofixFree tags=$TagOk app-can-bypass=$AppBypasses" }
 ```
 
-`autofix-free` must be true, or the engine can't create its branch. The protection is meant to stop exactly at `autofix/**`.
+- **`autofix-free` must be true**, or the engine can't create its branch. The protection is meant to stop exactly at `autofix/**`.
+- **`integration` must be true**, or ordinary merges are blocked. Also merge one ordinary PR after applying the gate, as a live check. The read-back sees every ruleset, but not push restrictions in classic branch protection.
 
 ### Gate 2: the target's CI must not run model-written code with network access
 
@@ -147,11 +166,33 @@ foreach ($F in $Files) { "== $F"; gh api "repos/$Target/contents/$F" -H 'Accept:
 
 For **each** workflow that runs on a push to a non-default branch, or on a `pull_request`, do one of two things.
 
-- **Skip it for autofix branches.**
-  - On a `push` trigger, add `branches-ignore: ['autofix/**']`.
-  - On a `pull_request` trigger, branch filters match the **base** branch, not the head, so a filter cannot do it. Add a job-level condition to every job instead: `if: ${{ !startsWith(github.head_ref, 'autofix/') }}`.
+- **Gate it behind a person's label (recommended).** CI still runs on an autofix PR, but only after someone has read the diff.
+  - **On a `push` trigger,** add `branches-ignore: ['autofix/**']`.
+  - **On a `pull_request` trigger,** branch filters match the **base** branch, not the head, so a filter can't do it. Add `labeled` to its `types`. Then make the **first step of a job that every other job `needs`** fail on an `autofix/` head, unless the event is the `labeled` event for your label, sent by a person:
 
-  CI then does **not** run on autofix branches at all. A re-run keeps the same `head_ref`, and a further push still matches `branches-ignore`. A reviewer who wants CI moves the commit to a branch of their own after reading the diff. A target that wants opt-in CI can add a label condition to the `if:`.
+    ```yaml
+    on:
+      pull_request:
+        types: [opened, synchronize, reopened, labeled]
+    # …and as step 0 of the root job:
+          - name: Autofix gate
+            env:
+              HEAD_REF: ${{ github.head_ref }}
+              ACTION: ${{ github.event.action }}
+              LABEL: ${{ github.event.label.name }}
+              SENDER_TYPE: ${{ github.event.sender.type }}
+            run: |
+              case "$HEAD_REF" in autofix/*) ;; *) exit 0 ;; esac
+              if [ "$ACTION" = "labeled" ] && [ "$LABEL" = "autofix-ci" ] && [ "$SENDER_TYPE" = "User" ]; then exit 0; fi
+              echo "::error::Model-written autofix PR: CI waits for a person to add the 'autofix-ci' label."
+              exit 1
+    ```
+
+    Create the label with `gh label create autofix-ci --repo $Target`.
+
+  ⚠️ **Make it a failing step, never a job-level `if:`.** A *skipped* job reports success, even as a required check (GitHub's Actions troubleshooting reference). So `if:` conditions would let an autofix PR show green, and merge, with no CI run at all. A failed root job means every dependent job never runs, and the required check goes **red** until a person labels the PR. *This corrects the gate as first written, which prescribed a job-level `if:` on every job.*
+
+  ⚠️ **Check the label event's sender, not whether the label is present.** The PR App's Pull requests *write* permission lets it add labels itself (GitHub's App permissions reference lists the add-labels endpoint under Pull requests). To re-run CI after a push to the branch, remove the label and add it again.
 - **Or record acceptance of this specific risk, in these words:** *"CI on this repository runs model-written code from autofix branches with network access before review. Anything in the agent's context, meaning the projected telemetry and this repository, can be sent anywhere by that code."* Record who accepted it and when, in the host's own tracker.
 
 `pull_request_target` and `workflow_run` workflows run with the base repository's secrets. Treat any that react to autofix branches as failing this gate until they are skipped.
