@@ -61,15 +61,17 @@ The `evidence` job logs in with OpenID Connect, so the host holds **no Azure sec
 2. Add a **federated credential**:
    - issuer `https://token.actions.githubusercontent.com`;
    - audience `api://AzureADTokenExchange`;
-   - subject `repo:<org>/<host repo>:ref:refs/heads/main`.
+   - subject `<prefix>:ref:refs/heads/main`, where `<prefix>` is what GitHub reports for the host repo (below).
 
    In a reusable workflow the token's subject names the **caller**, which is the host, so the credential is federated to the host and not to the engine.
+
+   ⚠️ **Read the prefix from GitHub; don't write it as `repo:<org>/<repo>`.** A repo using GitHub's immutable subject format issues `repo:<org>@<org id>/<repo>@<repo id>`, which never matches the plain form. The login then fails with `AADSTS700213: No matching federated identity record`. Ask the repo directly: `gh api "repos/$HostRepo/actions/oidc/customization/sub"` returns `sub_claim_prefix`, the exact prefix its tokens carry. *This corrects the subject as first written, `repo:<org>/<host repo>:ref:refs/heads/main`, which failed on the first host (2026-10-06).*
 3. Grant it **Log Analytics Reader** on each workspace a target lists, and nothing wider.
 
 ```powershell
-$HostName = $HostRepo.Split('/')[1]
-$Subject = "repo:$($Org)/$($HostName):ref:refs/heads/main"
-az ad app federated-credential create --id '<app object id>' --parameters "{`"name`":`"autofix-host`",`"issuer`":`"https://token.actions.githubusercontent.com`",`"subject`":`"$Subject`",`"audiences`":[`"api://AzureADTokenExchange`"]}"
+$Prefix = gh api "repos/$HostRepo/actions/oidc/customization/sub" --jq '.sub_claim_prefix'
+@{ name = 'autofix-host-main'; issuer = 'https://token.actions.githubusercontent.com'; subject = "$($Prefix):ref:refs/heads/main"; audiences = @('api://AzureADTokenExchange') } | ConvertTo-Json | Set-Content fic.json
+az ad app federated-credential create --id '<app object id>' --parameters fic.json
 az role assignment create --assignee '<client id>' --role 'Log Analytics Reader' --scope '<workspace resource id>'
 ```
 
