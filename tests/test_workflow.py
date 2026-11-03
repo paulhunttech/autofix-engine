@@ -220,3 +220,10 @@ def test_body_step_holds_no_token_and_gets_the_listing():
     assert not any("TOKEN" in k for k in step.get("env", {}))
     assert "token" not in yaml.safe_dump(step.get("env", {}))
     assert step["run"].strip().endswith("out/patch.diff out/open_prs.json")
+
+
+def test_a_failed_read_mint_cannot_fail_the_job():
+    """O9. Mutant killed: continue-on-error dropped from the read mint, so a transient mint failure costs the PR."""
+    steps = JOBS["pr"]["steps"]
+    assert steps[_pr_step(lambda s: s.get("id") == "read")].get("continue-on-error") is True
+    assert "continue-on-error" not in steps[_pr_step(lambda s: s.get("id") == "app")]

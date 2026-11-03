@@ -312,6 +312,9 @@ jobs:
           python3 engine/scripts/check_patch.py out/patch.diff "$ALLOW" target
       - name: Mint a read token for the open-PR listing
         id: read
+        # A failed mint leaves GH_TOKEN empty, so the listing fails into its own fallback and the
+        # body says "could not check". The overlap notice must never cost the PR.
+        continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.PR_APP_CLIENT_ID }}

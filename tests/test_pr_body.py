@@ -221,3 +221,18 @@ def test_main_end_to_end(tmp_path, monkeypatch):
     (tmp_path / "open.json").unlink()
     assert main(["pr_body.py"] + args) == 0
     assert COULD_NOT_CHECK in (tmp_path / "body.md").read_text()
+
+
+@pytest.mark.parametrize("patch", [None, 'diff --git "a/q" "b/q"\n--- "a/q"\n+++ "b/q"\n@@ -1 +1 @@\n-a\n+b\n'])
+def test_main_unreadable_patch_is_could_not_check(tmp_path, monkeypatch, patch):
+    """O8. Mutant killed: main()'s patch fallback set to an empty path set, so no notice at all."""
+    monkeypatch.setenv("INPUT_PROBLEM_ID", "pid")
+    monkeypatch.setenv("INPUT_WINDOW_START", "s")
+    monkeypatch.setenv("INPUT_WINDOW_END", "e")
+    (tmp_path / "result.json").write_text(json.dumps({"title": "t", "summary": "s"}))
+    if patch is not None:
+        (tmp_path / "patch.diff").write_text(patch)
+    (tmp_path / "open.json").write_text(json.dumps([]))
+    args = [str(tmp_path / n) for n in ("result.json", "title.txt", "body.md", "patch.diff", "open.json")]
+    assert main(["pr_body.py"] + args) == 0
+    assert COULD_NOT_CHECK in (tmp_path / "body.md").read_text()
