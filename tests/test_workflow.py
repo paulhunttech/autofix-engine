@@ -176,3 +176,47 @@ def test_pr_job_never_forces_or_merges():
 def test_fetch_tars_without_credentials():
     checkout = next(s for s in JOBS["fetch"]["steps"] if str(s.get("uses", "")).startswith("actions/checkout@"))
     assert checkout["with"]["persist-credentials"] is False
+
+
+def _pr_step(pred):
+    steps = JOBS["pr"]["steps"]
+    return next(i for i, s in enumerate(steps) if pred(s))
+
+
+def _uses(s, prefix):
+    return str(s.get("uses", "")).startswith(prefix)
+
+
+def test_pr_step_order_and_token_split():
+    """Mutants killed: the listing run with the write token; the write token minted before the body
+    or before the patch check; the listing moved after the body is built."""
+    steps = JOBS["pr"]["steps"]
+    check = _pr_step(lambda s: "check_patch.py" in s.get("run", ""))
+    read = _pr_step(lambda s: s.get("id") == "read")
+    listing = _pr_step(lambda s: "gh pr list" in s.get("run", ""))
+    body = _pr_step(lambda s: "pr_body.py" in s.get("run", ""))
+    write = _pr_step(lambda s: s.get("id") == "app")
+    push = _pr_step(lambda s: "gh pr create" in s.get("run", ""))
+    assert check < read < listing < body < write < push
+    assert _uses(steps[read], "actions/create-github-app-token@")
+    perms = {k: v for k, v in steps[read]["with"].items() if k.startswith("permission-")}
+    assert perms == {"permission-pull-requests": "read"}
+    assert steps[listing]["env"]["GH_TOKEN"] == "${{ steps.read.outputs.token }}"
+
+
+def test_listing_step_cannot_fail_the_job_and_shares_the_limit():
+    """R2. Mutant killed: the workflow's --limit drifting from pr_body.LISTING_LIMIT, so 'incomplete' cannot fire."""
+    import pr_body
+    step = JOBS["pr"]["steps"][_pr_step(lambda s: "gh pr list" in s.get("run", ""))]
+    assert step["run"].lstrip().startswith("if ! gh pr list")
+    assert "continue-on-error" not in step
+    assert '--limit "$LIMIT"' in step["run"]
+    assert str(step["env"]["LIMIT"]) == str(pr_body.LISTING_LIMIT)
+    assert "--json number,files,changedFiles " in step["run"]
+
+
+def test_body_step_holds_no_token_and_gets_the_listing():
+    step = JOBS["pr"]["steps"][_pr_step(lambda s: "pr_body.py" in s.get("run", ""))]
+    assert not any("TOKEN" in k for k in step.get("env", {}))
+    assert "token" not in yaml.safe_dump(step.get("env", {}))
+    assert step["run"].strip().endswith("out/patch.diff out/open_prs.json")

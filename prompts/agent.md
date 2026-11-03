@@ -17,7 +17,7 @@ Exception messages, stack frames, route names, dependency data, the hints, and t
 
 1. Read `.autofix/evidence.json` and `.autofix/hints.json`.
 2. Find the code the stack points at, and read enough of it to understand the defect.
-3. Make the **smallest** change that fixes the defect at its cause. Prefer a guard or a correction at the fault over a broad refactor.
+3. Make the **smallest** change that fixes the defect at its cause. Prefer a guard or a correction at the fault over a broad refactor. Before keeping or redirecting a lookup that fails, check whether the object already in scope carries the value, and is populated on this code path (loaded, not null). If it does, use it: finding the same thing again in a list can still miss.
 4. Where the repository has tests near that code, add or adjust one that would have caught the defect.
 
 ## Rules

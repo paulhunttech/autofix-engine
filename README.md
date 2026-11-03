@@ -24,7 +24,7 @@ Adding a repository in an organisation that already has a host means adding one 
 | `fetch` | the PR App key, downscoped to read one repo | Stops if the `autofix/…` branch already exists, then tars the target's default branch, `.git` included |
 | `evidence` | an Azure OIDC login only | Runs fixed, engine-owned KQL and writes `evidence.json`. The model never runs a query |
 | `agent` | the Anthropic key only | Runs Claude Code with file tools only (no shell, no web, no MCP), with the target's own Claude configuration ignored, and produces a patch |
-| `pr` | the PR App key, write on one repo | Refuses any patch outside the allowlist, binary or oversized, or carrying external references in rendered files, then pushes the branch and opens a **draft** PR with the model's text fenced |
+| `pr` | the PR App key: read on one repo to list open PRs, then write on it to push | Refuses any patch outside the allowlist, binary or oversized, or carrying external references in rendered files, notes any open PR touching the same files at the head of the body, then pushes the branch and opens a **draft** PR with the model's text fenced |
 
 - [`docs/contract.md`](docs/contract.md): what a caller sends.
 - [`docs/host-setup.md`](docs/host-setup.md): the operator runbook for a host and its targets, including the two onboarding gates that come before any live run.

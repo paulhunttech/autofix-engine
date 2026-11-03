@@ -7,7 +7,8 @@
 #   fetch     PR App key (read)     dedupes on the branch, tars the target's default branch with .git
 #   evidence  Azure OIDC only       runs fixed engine-owned KQL, writes evidence.json
 #   agent     Anthropic key only    runs Claude with file tools only, produces patch.diff + result.json
-#   pr        PR App key (write)    checks the patch, pushes autofix/<hash>, opens a draft PR
+#   pr        PR App key (read, then write)  checks the patch, notes open PRs on the same files,
+#                                    pushes autofix/<hash>, opens a draft PR
 #
 # Every input is untrusted data. It reaches a step only through `env:`; no expression
 # appears inside any `run:` (tests/test_workflow.py enforces this).
@@ -309,12 +310,34 @@ jobs:
           mkdir target
           tar -C target -xf tree.tar
           python3 engine/scripts/check_patch.py out/patch.diff "$ALLOW" target
+      - name: Mint a read token for the open-PR listing
+        id: read
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.PR_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PR_APP_PRIVATE_KEY }}
+          owner: ${{ needs.resolve.outputs.owner }}
+          repositories: ${{ needs.resolve.outputs.name }}
+          permission-pull-requests: read
+      - name: List open PRs on the target (never fails the job)
+        # Numbers, file paths and file counts only: no titles, branches or authors enter the job.
+        # A failed listing leaves an empty file, which pr_body.py reads as "could not check".
+        # LIMIT must equal pr_body.LISTING_LIMIT (tests/test_workflow.py).
+        env:
+          GH_TOKEN: ${{ steps.read.outputs.token }}
+          REPO: ${{ needs.resolve.outputs.repo }}
+          LIMIT: "200"
+        run: |
+          if ! gh pr list --repo "$REPO" --state open --limit "$LIMIT" --json number,files,changedFiles > out/open_prs.json; then
+            echo "::warning::could not list open PRs on the target; the PR body says so"
+            : > out/open_prs.json
+          fi
       - name: Build the PR title and body
         env:
           INPUT_PROBLEM_ID: ${{ inputs.problem_id }}
           INPUT_WINDOW_START: ${{ inputs.window_start }}
           INPUT_WINDOW_END: ${{ inputs.window_end }}
-        run: python3 engine/scripts/pr_body.py out/result.json out/title.txt out/body.md
+        run: python3 engine/scripts/pr_body.py out/result.json out/title.txt out/body.md out/patch.diff out/open_prs.json
       - name: Mint a write token for the target
         id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
