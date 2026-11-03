@@ -33,6 +33,8 @@ Nothing is returned. The outcome is in the host run's summary, which carries cou
 
 The branch is `autofix/<first 8 hex of sha256(problem_id)>`. If that branch already exists on the target, in any state, the run stops before any model spend. The host also serialises runs on `target` + `problem_id` with a concurrency group.
 
+The branch is the only dedupe that stops a run. A person's PR is never on an `autofix/` branch, so job `pr` also lists the target's open PRs, with a token that can only read pull requests, and names any that change a file the patch changes at the head of the draft's body. That notice never stops the run, and a listing that fails or is incomplete says so in the body.
+
 ## Versioning
 
 The host pins the engine to a full commit SHA. Changing these inputs is a breaking change to the engine, and it is recorded in the engine's commit history.
